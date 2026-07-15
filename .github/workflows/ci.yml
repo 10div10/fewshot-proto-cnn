@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check src/ tests/ --output-format=github
+
+      # Prototype-store tests are pure math (numpy), no network/torch weight
+      # download needed -- fast and safe to run on every push.
+      - name: Run prototype store unit tests
+        run: pytest tests/test_prototype_store.py -v --tb=short
+
+      # Embedder/API tests need real pretrained weights downloaded from
+      # download.pytorch.org, which GitHub-hosted runners can reach fine
+      # (unlike some sandboxed environments) -- run separately so a failure
+      # here doesn't block the fast, network-free suite above from being visible.
+      - name: Generate sample data and run full pipeline smoke test
+        run: |
+          python scripts/generate_sample_data.py
+          python -c "
+          from src.embedder import get_embedder
+          from src.prototype_store import PrototypeStore
+          import os
+
+          embedder = get_embedder()
+          store = PrototypeStore()
+          for class_name in os.listdir('sample_data'):
+              class_dir = f'sample_data/{class_name}'
+              files = sorted(os.listdir(class_dir))[:6]
+              embeddings = [embedder.embed(open(os.path.join(class_dir, f), 'rb').read()) for f in files]
+              store.add_class(class_name, embeddings)
+          print('Pipeline smoke test passed:', store.list_classes())
+          "
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t fewshot-proto-cnn:${{ github.sha }} .
+
+      - name: Smoke test container
+        run: |
+          docker run -d -p 8000:8000 --name fewshot-proto-cnn fewshot-proto-cnn:${{ github.sha }}
+          sleep 5
+          curl --fail http://localhost:8000/health
+          docker stop fewshot-proto-cnn

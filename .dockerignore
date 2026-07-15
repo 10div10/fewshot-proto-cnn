@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.github/
+tests/
+venv/
+.venv/
+*.md
+.ruff_cache/
+sample_data/
+prototypes.json

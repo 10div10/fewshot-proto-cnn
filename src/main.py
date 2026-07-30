@@ -84,7 +84,8 @@ async def add_class(class_name: str, files: list[UploadFile] = CLASS_FILES_DEFAU
         try:
             embeddings.append(embedder.embed(content))
         except (ValueError, OSError, RuntimeError, TypeError) as e:
-            logger.exception("Could not embed reference image '%s': %s", f.filename, e)
+            # logging.exception already records the exception info; don't include `e` in the format args
+            logger.exception("Could not embed reference image '%s'", f.filename)
             raise HTTPException(status_code=400, detail=f"Could not process image '{f.filename}': {e}")
 
     store.add_class(class_name, embeddings)
@@ -117,7 +118,8 @@ async def predict(file: UploadFile = SINGLE_FILE_DEFAULT):
     try:
         embedding, latency_ms = embedder.embed_with_timing(content)
     except (ValueError, OSError, RuntimeError, TypeError) as e:
-        logger.exception("Could not embed input image: %s", e)
+        # logging.exception records the traceback; keep the exception for the HTTP detail but don't pass it to logger.exception
+        logger.exception("Could not embed input image")
         raise HTTPException(status_code=400, detail=f"Could not process image: {e}")
 
     result = store.predict(embedding)
